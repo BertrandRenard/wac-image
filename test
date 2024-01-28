@@ -1,0 +1,53 @@
+import cvxpy as cp
+import numpy as np
+
+# Données hypothétiques (remplacer par vos données)
+N = 1000  # Nombre d'actifs
+montant_dispo = np.random.uniform(100, 1000, N)  # Montants disponibles pour chaque actif
+rwa = np.random.uniform(0, 1, N)  # RWA pour chaque actif
+pays = np.random.choice(['FRANCE', 'USA', 'ALLEMAGNE'], N)  # Pays pour chaque actif
+
+# Simuler les noms de contreparties et leur statut
+noms_contrepartie = np.random.choice(['A', 'B', 'C', 'D'], N)
+statut_contrepartie = {'A': False, 'B': True, 'C': False, 'D': True}  # Statut pour chaque contrepartie
+
+# Limites d'allocation par pays
+limites_pays = {'FRANCE': 10000, 'USA': 20000, 'ALLEMAGNE': 15000}
+
+# Montant minimum souhaité pour les contreparties avec statut "faux"
+S = 5000
+
+# Variables de décision
+x = cp.Variable(N, nonneg=True)
+
+# Créer une variable binaire pour chaque contrepartie unique
+contreparties_uniques = np.unique(noms_contrepartie)
+y = {contrepartie: cp.Variable(boolean=True) for contrepartie in contreparties_uniques}
+
+# Fonction objectif
+objective = cp.Maximize(cp.sum(cp.multiply(cp.multiply(x, montant_dispo), rwa)))
+
+# Contraintes
+constraints = []
+
+# Contraintes strictes par pays
+for pays_key, limite in limites_pays.items():
+    constraints.append(cp.sum(cp.multiply(x, montant_dispo)[pays == pays_key]) <= limite)
+
+# Contrainte souple pour chaque contrepartie avec statut "faux"
+for contrepartie in contreparties_uniques:
+    indices = noms_contrepartie == contrepartie
+    if not statut_contrepartie[contrepartie]:  # Si le statut de la contrepartie est "faux"
+        constraints.append(cp.sum(cp.multiply(x[indices], montant_dispo[indices])) >= S * y[contrepartie])
+
+# Les valeurs de x doivent être entre 0 et 1
+constraints.append(x <= 1)
+
+# Résolution du problème
+prob = cp.Problem(objective, constraints)
+prob.solve()
+
+# Résultats
+print("Statut de la solution :", prob.status)
+print("Valeur optimale :", prob.value)
+print("Allocations optimales :", x.value)
