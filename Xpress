@@ -1,0 +1,59 @@
+import ctypes
+import sys
+
+# Charger ntdll.dll
+ntdll = ctypes.WinDLL("ntdll.dll")
+
+# Définition de la fonction RtlDecompressBufferEx
+RtlDecompressBufferEx = ntdll.RtlDecompressBufferEx
+RtlDecompressBufferEx.argtypes = [
+    ctypes.c_ushort,  # CompressionFormat
+    ctypes.POINTER(ctypes.c_ubyte),  # UncompressedBuffer
+    ctypes.c_ulong,  # UncompressedBufferSize
+    ctypes.POINTER(ctypes.c_ubyte),  # CompressedBuffer
+    ctypes.c_ulong,  # CompressedBufferSize
+    ctypes.POINTER(ctypes.c_ulong),  # FinalUncompressedSize
+    ctypes.c_void_p  # WorkSpace (NULL ici)
+]
+RtlDecompressBufferEx.restype = ctypes.c_int
+
+def read_file(filename):
+    with open(filename, "rb") as f:
+        return bytearray(f.read())
+
+def write_file(filename, data):
+    with open(filename, "wb") as f:
+        f.write(data)
+
+def decompress_xpress9(input_file, output_file):
+    compressed_data = read_file(input_file)
+    
+    # On suppose que la taille décompressée est 10x la taille compressée
+    estimated_size = len(compressed_data) * 10
+    uncompressed_data = (ctypes.c_ubyte * estimated_size)()
+    decompressed_size = ctypes.c_ulong()
+
+    status = RtlDecompressBufferEx(
+        4,  # XPRESS9
+        uncompressed_data,
+        estimated_size,
+        (ctypes.c_ubyte * len(compressed_data))(*compressed_data),
+        len(compressed_data),
+        ctypes.byref(decompressed_size),
+        None  # Pas besoin de WorkSpace
+    )
+
+    if status != 0:
+        print(f"Erreur de décompression : Code {status}")
+        return
+
+    # Sauvegarder le fichier décompressé
+    write_file(output_file, bytes(uncompressed_data[:decompressed_size.value]))
+    print(f"Décompression réussie ! Fichier sauvegardé : {output_file}")
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print(f"Usage: python {sys.argv[0]} <fichier_input> <fichier_output>")
+        sys.exit(1)
+
+    decompress_xpress9(sys.argv[1], sys.argv[2])
