@@ -1,53 +1,66 @@
-import cvxpy as cp
-import numpy as np
+import subprocess
+import json
+import concurrent.futures
 
-# Données hypothétiques (remplacer par vos données)
-N = 1000  # Nombre d'actifs
-montant_dispo = np.random.uniform(100, 1000, N)  # Montants disponibles pour chaque actif
-rwa = np.random.uniform(0, 1, N)  # RWA pour chaque actif
-pays = np.random.choice(['FRANCE', 'USA', 'ALLEMAGNE'], N)  # Pays pour chaque actif
+def get_latest_version(package_name):
+    """Récupère la dernière version disponible d'un package sur PyPI"""
+    try:
+        result = subprocess.run(
+            ["pip", "index", "versions", package_name],
+            capture_output=True,
+            text=True
+        )
+        lines = result.stdout.splitlines()
+        for line in lines:
+            if "Available versions" in line:
+                versions = line.split(":")[1].strip().split(", ")
+                return package_name, versions[0]  # Dernière version
+    except Exception as e:
+        return package_name, f"Erreur: {e}"
+    return package_name, "Non trouvé"
 
-# Simuler les noms de contreparties et leur statut
-noms_contrepartie = np.random.choice(['A', 'B', 'C', 'D'], N)
-statut_contrepartie = {'A': False, 'B': True, 'C': False, 'D': True}  # Statut pour chaque contrepartie
+def get_latest_versions(packages):
+    """Récupère les dernières versions en parallèle avec ThreadPoolExecutor"""
+    latest_versions = {}
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = {executor.submit(get_latest_version, pkg): pkg for pkg in packages}
+        for future in concurrent.futures.as_completed(futures):
+            package, version = future.result()
+            latest_versions[package] = version
+    return latest_versions
 
-# Limites d'allocation par pays
-limites_pays = {'FRANCE': 10000, 'USA': 20000, 'ALLEMAGNE': 15000}
+def get_all_dependencies(packages_with_versions):
+    """Exécute pip install --dry-run avec toutes les librairies en une seule commande"""
+    package_list = [f"{pkg}=={ver}" for pkg, ver in packages_with_versions.items()]
+    try:
+        result = subprocess.run(
+            ["pip", "install", "--dry-run"] + package_list,
+            capture_output=True,
+            text=True
+        )
+        dependencies = []
+        for line in result.stdout.splitlines():
+            if "Collecting" in line:
+                dep = line.split("Collecting")[-1].strip()
+                dependencies.append(dep)
+        return dependencies
+    except Exception as e:
+        return [f"Erreur: {e}"]
 
-# Montant minimum souhaité pour les contreparties avec statut "faux"
-S = 5000
+def main(packages):
+    print("Récupération des dernières versions...")
+    latest_versions = get_latest_versions(packages)
 
-# Variables de décision
-x = cp.Variable(N, nonneg=True)
+    print("Récupération des dépendances...")
+    dependencies = get_all_dependencies(latest_versions)
+    
+    output = {
+        "latest_versions": latest_versions,
+        "dependencies": dependencies
+    }
+    
+    print(json.dumps(output, indent=4))
 
-# Créer une variable binaire pour chaque contrepartie unique
-contreparties_uniques = np.unique(noms_contrepartie)
-y = {contrepartie: cp.Variable(boolean=True) for contrepartie in contreparties_uniques}
-
-# Fonction objectif
-objective = cp.Maximize(cp.sum(cp.multiply(cp.multiply(x, montant_dispo), rwa)))
-
-# Contraintes
-constraints = []
-
-# Contraintes strictes par pays
-for pays_key, limite in limites_pays.items():
-    constraints.append(cp.sum(cp.multiply(x, montant_dispo)[pays == pays_key]) <= limite)
-
-# Contrainte souple pour chaque contrepartie avec statut "faux"
-for contrepartie in contreparties_uniques:
-    indices = noms_contrepartie == contrepartie
-    if not statut_contrepartie[contrepartie]:  # Si le statut de la contrepartie est "faux"
-        constraints.append(cp.sum(cp.multiply(x[indices], montant_dispo[indices])) >= S * y[contrepartie])
-
-# Les valeurs de x doivent être entre 0 et 1
-constraints.append(x <= 1)
-
-# Résolution du problème
-prob = cp.Problem(objective, constraints)
-prob.solve()
-
-# Résultats
-print("Statut de la solution :", prob.status)
-print("Valeur optimale :", prob.value)
-print("Allocations optimales :", x.value)
+# Liste des librairies à analyser
+packages = ["requests", "flask", "numpy", "pandas", "scipy", "matplotlib"]  # Remplace avec ta liste
+main(packages)
